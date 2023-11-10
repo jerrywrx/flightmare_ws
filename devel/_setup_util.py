@@ -1,4 +1,4 @@
-#!/home/jerrywang/miniconda3/envs/flightmare/bin/python3
+#!/home/jerrywang/miniconda3/bin/python3
 # -*- coding: utf-8 -*-
 
 # Software License Agreement (BSD License)

@@ -12,6 +12,6 @@
     <node name="camera" pkg="flightros" type="camera" output="screen" unless="$(arg debug)">
     </node>
         
-    <node type="rviz" name="rviz" pkg="rviz" args="-d $(find flightros)/launch/camera/camera.rviz" />
+    <node type="rviz" name="rviz" pkg="rviz" args="-d $(find flightros)/launch/racing/racing.rviz" />
 
 </launch>

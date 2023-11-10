@@ -29,10 +29,20 @@ int main(int argc, char *argv[]) {
   ros::NodeHandle pnh("~");
   ros::Rate(50.0);
 
-  // Flightmare(Unity3D)
-  std::shared_ptr<UnityBridge> unity_bridge_ptr = UnityBridge::getInstance();
-  SceneID scene_id{UnityScene::WAREHOUSE};
-  bool unity_ready{false};
+  std::shared_ptr<RGBCamera> rgb_camera = std::make_shared<RGBCamera>();
+  
+  // publisher
+  image_transport::Publisher rgb_pub;
+  image_transport::Publisher depth_pub;
+  image_transport::Publisher segmentation_pub;
+  image_transport::Publisher opticalflow_pub;
+
+  // initialize publishers
+  image_transport::ImageTransport it(pnh);
+  rgb_pub = it.advertise("/rgb", 1);
+  depth_pub = it.advertise("/depth", 1);
+  segmentation_pub = it.advertise("/segmentation", 1);
+  opticalflow_pub = it.advertise("/opticalflow", 1);
 
   // unity quadrotor
   std::shared_ptr<Quadrotor> quad_ptr = std::make_shared<Quadrotor>();
@@ -42,6 +52,23 @@ int main(int argc, char *argv[]) {
   // define quadsize scale (for unity visualization only)
   Vector<3> quad_size(0.5, 0.5, 0.5);
   quad_ptr->setSize(quad_size);
+
+  // camera settings
+  Vector<3> B_r_BC(0.0, 0.0, 0.3);
+  Matrix<3, 3> R_BC = Quaternion(1.0, 0.0, 0.0, 0.0).toRotationMatrix();
+  std::cout << R_BC << std::endl;
+  rgb_camera->setFOV(90);
+  rgb_camera->setWidth(640);
+  rgb_camera->setHeight(360);
+  rgb_camera->setRelPose(B_r_BC, R_BC);
+  rgb_camera->setPostProcesscing(
+    std::vector<bool>{true, true, true});  // depth, segmentation, optical flow
+  quad_ptr->addRGBCamera(rgb_camera);
+
+  // Flightmare(Unity3D)
+  std::shared_ptr<UnityBridge> unity_bridge_ptr = UnityBridge::getInstance();
+  SceneID scene_id{UnityScene::WAREHOUSE};
+  bool unity_ready{false};
 
   // Initialize gates
   std::string object_id = "unity_gate";
@@ -87,27 +114,11 @@ int main(int argc, char *argv[]) {
       generateMinimumSnapRingTrajectory(segment_times, trajectory_settings,
                                         20.0, 20.0, 6.0);
 
-  // Create image transport publishers for RGB and depth images
-  image_transport::ImageTransport it(nh);
-  image_transport::Publisher rgb_pub = it.advertise("rgb_image", 1);
-  image_transport::Publisher depth_pub = it.advertise("depth_image", 1);
-
-  // Capture RGB and depth images
-  cv::Mat rgb_image, depth_image;
-
-  // Convert RGB and depth images to ROS image messages
-  sensor_msgs::ImagePtr rgb_msg = cv_bridge::CvImage(std_msgs::Header(), "bgr8", rgb_image).toImageMsg();
-  sensor_msgs::ImagePtr depth_msg = cv_bridge::CvImage(std_msgs::Header(), "mono16", depth_image).toImageMsg();
-
-  // Publish RGB and depth image messages to ROS topics
-  rgb_pub.publish(rgb_msg);
-  depth_pub.publish(depth_msg);
-
   // Start racing
   ros::Time t0 = ros::Time::now();
 
-  unity_bridge_ptr->addStaticObject(gate_1);
-  unity_bridge_ptr->addStaticObject(gate_2);
+  // unity_bridge_ptr->addStaticObject(gate_1);
+  // unity_bridge_ptr->addStaticObject(gate_2);
   unity_bridge_ptr->addStaticObject(gate_3);
   unity_bridge_ptr->addQuadrotor(quad_ptr);
   // connect unity
@@ -118,7 +129,7 @@ int main(int argc, char *argv[]) {
     quadrotor_common::TrajectoryPoint desired_pose =
       polynomial_trajectories::getPointFromTrajectory(
         trajectory, ros::Duration((ros::Time::now() - t0)));
-    //
+    
     quad_state.x[QS::POSX] = (Scalar)desired_pose.position.x();
     quad_state.x[QS::POSY] = (Scalar)desired_pose.position.y();
     quad_state.x[QS::POSZ] = (Scalar)desired_pose.position.z();
@@ -126,6 +137,9 @@ int main(int argc, char *argv[]) {
     quad_state.x[QS::ATTX] = (Scalar)desired_pose.orientation.x();
     quad_state.x[QS::ATTY] = (Scalar)desired_pose.orientation.y();
     quad_state.x[QS::ATTZ] = (Scalar)desired_pose.orientation.z();
+
+    // quad_state.x[QS::POSY] = -5.0;
+    // quad_state.x[QS::POSZ] = 2.0;
 
     quad_ptr->setState(quad_state);
 
@@ -135,6 +149,34 @@ int main(int argc, char *argv[]) {
 
     unity_bridge_ptr->getRender(frame_id);
     unity_bridge_ptr->handleOutput();
+
+    cv::Mat img;
+
+    ros::Time timestamp = ros::Time::now();
+
+    rgb_camera->getRGBImage(img);
+    sensor_msgs::ImagePtr rgb_msg =
+      cv_bridge::CvImage(std_msgs::Header(), "bgr8", img).toImageMsg();
+    rgb_msg->header.stamp = timestamp;
+    rgb_pub.publish(rgb_msg);
+
+    rgb_camera->getDepthMap(img);
+    sensor_msgs::ImagePtr depth_msg =
+      cv_bridge::CvImage(std_msgs::Header(), "32FC1", img).toImageMsg();
+    depth_msg->header.stamp = timestamp;
+    depth_pub.publish(depth_msg);
+
+    rgb_camera->getSegmentation(img); 
+    sensor_msgs::ImagePtr segmentation_msg =
+      cv_bridge::CvImage(std_msgs::Header(), "bgr8", img).toImageMsg();
+    segmentation_msg->header.stamp = timestamp;
+    segmentation_pub.publish(segmentation_msg);
+
+    rgb_camera->getOpticalFlow(img);
+    sensor_msgs::ImagePtr opticflow_msg =
+      cv_bridge::CvImage(std_msgs::Header(), "bgr8", img).toImageMsg();
+    opticflow_msg->header.stamp = timestamp;
+    opticalflow_pub.publish(opticflow_msg);
 
     //
     frame_id += 1;
