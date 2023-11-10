@@ -260,4 +260,6 @@ bool Quadrotor::getCamera(const size_t cam_id,
 
 bool Quadrotor::getCollision() const { return collision_; }
 
+Quaternion Quadrotor::getQuaternion(void) const { return state_.q(); }
+
 }  // namespace flightlib
